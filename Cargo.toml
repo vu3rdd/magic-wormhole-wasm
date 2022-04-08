@@ -11,10 +11,18 @@ crate-type = ["cdylib", "rlib"]
 default = ["console_error_panic_hook"]
 
 [dependencies]
-wasm-bindgen = { version = "0.2.63"}
-getrandom = { features = ["js"] }
-clear_on_drop = { features = ["no_cc"] }
-magic-wormhole = { git = "https://github.com/magic-wormhole/magic-wormhole.rs", tag = "0.2.0"}
+wasm-bindgen = { version = "0.2.78" }
+wasm-bindgen-futures = "0.4.28"
+wasm-logger = "0.2.0"
+#getrandom = { version = "0.2", features = ["js"] }
+getrandom = { version = "0.1", features = ["wasm-bindgen"] }
+url = "2.2.2"
+clear_on_drop = { version = "0.2.4", features = ["no_cc"] }
+#rand = { version = "0.8.5", features = ["wasm-bindgen"] }
+#magic-wormhole = { git = "https://github.com/andipabst/magic-wormhole.rs", features = ["wasm"], rev = "654cf3a" }
+magic-wormhole = { path = "../magic-wormhole.rs", features = ["wasm"], default-features = false }
+web-sys = { version = "0.3.55", features = ["HtmlElement", "HtmlInputElement", "FileReader", "ProgressEvent", "FileList", "File"] }
+js-sys = "0.3.57"
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires

@@ -1,11 +1,27 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <title>Hello wasm-pack!</title>
   </head>
   <body>
-    <noscript>This page contains webassembly and javascript content, please enable javascript in your browser.</noscript>
-    <script src="./bootstrap.js"></script>
+  <noscript>This page contains webassembly and javascript content, please enable javascript in your browser.</noscript>
+  <script src="./bootstrap.js"></script>
+
+  <div style="max-width: 80%; margin: auto">
+    <h3>Send File</h3>
+    <label for="file-input">Send File</label>
+    <input id="file-input" type="file">
+    <hr/>
+    <h3>Receive File</h3>
+    <label for="code-input">Input Code</label>
+    <input id="code-input" type="text">
+
+    <button id="button-start">Start</button>
+
+    <hr/>
+    <h3>Output</h3>
+    <p id="code-output"></p>
+  </div>
   </body>
 </html>
