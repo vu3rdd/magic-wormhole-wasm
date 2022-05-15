@@ -6,9 +6,19 @@ module.exports = {
   output: {
     path: path.resolve(__dirname, "dist"),
     filename: "bootstrap.js",
+    hashFunction: "sha256"
   },
   mode: "development",
   plugins: [
-    new CopyWebpackPlugin(['index.html'])
+    new CopyWebpackPlugin({
+      patterns: [
+        {
+          from: "index.html",
+        },
+      ],
+    }),
   ],
+  experiments: {
+    syncWebAssembly: true, // deprecated, see https://github.com/webpack/webpack/issues/11347
+  },
 };
