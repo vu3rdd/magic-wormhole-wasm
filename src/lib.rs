@@ -32,17 +32,13 @@ macro_rules! console_log {
 async fn connect(code: Option<String>) -> Result<(String, Wormhole), WormholeError> {
     match code {
         Some(code) => {
-            let (server_welcome, mut wormhole) = magic_wormhole::Wormhole::connect_with_code(
+            let (server_welcome, wormhole) = magic_wormhole::Wormhole::connect_with_code(
                 transfer::APP_CONFIG.rendezvous_url("ws://relay.magic-wormhole.io:4000/v1".into()),
                 Code(code),
             ).await?;
-            console_log!("{:?}", server_welcome.code);
+            console_log!("wormhole connection opened");
 
-            let data = wormhole.receive().await?;
-            let data = String::from_utf8(data).unwrap();
-            console_log!("{}", data);
-
-            Ok((data, wormhole))
+            Ok(("".into(), wormhole))
         }
 
         None => {
@@ -52,7 +48,7 @@ async fn connect(code: Option<String>) -> Result<(String, Wormhole), WormholeErr
             ).await?;
             console_log!("{:?}", server_welcome.code);
 
-            let mut wormhole = connector.await?;
+            let wormhole = connector.await?;
 
             Ok((server_welcome.code.0, wormhole))
         }
@@ -86,7 +82,8 @@ pub async fn send(file_input: web_sys::HtmlInputElement, output: web_sys::HtmlEl
         return;
     }
 
-    let file = filelist.get(0).expect("Failed to get File from filelist!");
+    let file: web_sys::File = filelist.get(0).expect("Failed to get File from filelist!");
+    let file_name = file.name();
 
     let file_reader: web_sys::FileReader = web_sys::FileReader::new().expect("failed to create a file reader");
 
@@ -95,9 +92,9 @@ pub async fn send(file_input: web_sys::HtmlInputElement, output: web_sys::HtmlEl
         let array = js_sys::Uint8Array::new(&file_reader_target.result().unwrap());
         let len = array.byte_length() as u64;
         let data_to_send: Vec<u8> = array.to_vec();
-        log(&format!("Raw data ({} bytes): {:?}", len, data_to_send));
+        console_log!("Raw data ({} bytes): {:?}", len, data_to_send);
 
-        wasm_bindgen_futures::spawn_local(send_via_wormhole(data_to_send, len))
+        wasm_bindgen_futures::spawn_local(send_via_wormhole(data_to_send, len, file_name.clone()))
     }) as Box<dyn Fn(web_sys::ProgressEvent)>);
 
     file_reader.set_onloadend(Some(onloadend_cb.as_ref().unchecked_ref()));
@@ -105,45 +102,40 @@ pub async fn send(file_input: web_sys::HtmlInputElement, output: web_sys::HtmlEl
     onloadend_cb.forget();
 }
 
-async fn send_via_wormhole(file: Vec<u8>, file_size: u64) {
+async fn send_via_wormhole(file: Vec<u8>, file_size: u64, file_name: String) {
     match connect(None).await {
         Ok((data, wormhole)) => {
             //output.set_inner_text(&data);
-            log(&format!("Connected. Code: {}", data));
+            console_log!("Connected. Code: {}", data);
 
-            /*let transfer_result = transfer::send_file(
+            let transfer_result = transfer::send_file(
                 wormhole,
                 url::Url::parse("ws://relay.magic-wormhole.io:4000/v1").unwrap(),
                 &mut &file[..],
-                PathBuf::from("file"),
+                PathBuf::from(file_name),
                 file_size,
                 transit::Abilities::FORCE_RELAY,
-                move |_sent, _total| {
-                    // if sent == 0 {
-                    //     pb2.reset_elapsed();
-                    //     pb2.enable_steady_tick(250);
-                    // }
-                    // pb2.set_position(sent);
+                |info, address| {
+                    console_log!("Connected to '{:?}' on address {:?}", info, address);
                 },
-                |_cur, _total| {},
+                |cur, total| {
+                    console_log!("Progress: {}/{}", cur, total);
+                },
                 NoOpFuture {},
             ).await;
-            */
-
-            let transfer_result: Result<(), ()> = Ok(());
 
             match transfer_result {
                 Ok(_) => {
-                    log(&format!("Data sent"));
+                    console_log!("Data sent");
                 }
-                Err(_) => {
-                    log(&format!("Error in data transfer"));
+                Err(e) => {
+                    console_log!("Error in data transfer: {:?}", e);
                 }
             }
         }
         Err(_) => {
             //output.set_inner_text(&"Error in connection".to_string());
-            log(&format!("Error in connection"));
+            console_log!("Error in connection");
         }
     };
 }
@@ -154,11 +146,46 @@ pub async fn receive(code: String, output: web_sys::HtmlElement) {
     console_error_panic_hook::set_once();
 
     match connect(Some(code)).await {
-        Ok((data, wormhole)) => {
-            output.set_inner_text(&data);
+        Ok((_, wormhole)) => {
+            let req = transfer::request_file(
+                wormhole,
+                url::Url::parse("ws://relay.magic-wormhole.io:4000/v1").unwrap(),
+                transit::Abilities::FORCE_RELAY,
+                NoOpFuture {},
+            ).await;
+
+            let mut file: Vec<u8> = Vec::new();
+
+            match req {
+                Ok(Some(req)) => {
+                    console_log!("File name: {:?}, size: {}", req.filename, req.filesize);
+                    let file_accept = req.accept(
+                        |info, address| {
+                            console_log!("Connected to '{:?}' on address {:?}", info, address);
+                        },
+                        |cur, total| {
+                            console_log!("Progress: {}/{}", cur, total);
+                        },
+                        &mut file,
+                        NoOpFuture {},
+                    );
+
+                    match file_accept.await {
+                        Ok(_) => {
+                            console_log!("Data received");
+                        }
+                        Err(e) => {
+                            console_log!("Error in data transfer: {:?}", e);
+                        }
+                    }
+                }
+                _ => {
+                    console_log!("No ReceiveRequest");
+                }
+            };
         }
         Err(_) => {
-            output.set_inner_text(&"Error in connection".to_string());
+            output.set_inner_text("Error in connection");
         }
     }
 }

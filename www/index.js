@@ -13,8 +13,7 @@ startButton.addEventListener('click', () => {
     } else {
         wasm.receive(code, codeOutput)
             .then(x => {
-                console.log("code: " + x);
-                codeOutput.innerText = x;
+                console.log("receiving finished");
             })
     }
 })
@@ -22,8 +21,7 @@ startButton.addEventListener('click', () => {
 fileInput.addEventListener('input', () => {
     wasm.send(fileInput, codeOutput)
         .then(x => {
-            console.log("code: " + x);
-            codeOutput.innerText = x;
+            console.log("sending finished");
         })
 })
 
