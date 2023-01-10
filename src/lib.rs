@@ -78,7 +78,8 @@ pub async fn send(file_input: web_sys::HtmlInputElement, output: web_sys::HtmlEl
 #[wasm_bindgen]
 pub struct JsConnection {
     code: Code,
-    wormholeAddress: u8,
+    // wormholeAddress: u8,
+    kontAddress: u8,
 }
 
 #[wasm_bindgen]
@@ -90,6 +91,16 @@ pub struct Config {
 }
 
 #[wasm_bindgen]
+pub fn create_config(appid: String, rendezvous_url: String, transit_server_url: String, passphrase_component_len: usize) -> Config {
+    Config {
+        appid,
+        rendezvous_url,
+        transit_server_url,
+        passphrase_component_len
+    }
+}
+
+#[wasm_bindgen]
 pub async fn create_connection(cfg: &Config) -> JsConnection {
     let mut config = transfer::APP_CONFIG;
     config.id = AppID::from(cfg.appid.clone());
@@ -98,16 +109,16 @@ pub async fn create_connection(cfg: &Config) -> JsConnection {
 
     // haven't serialized error types yet, so i just unwrap everything for now
     let (welcome, kont) = connect.await.unwrap();
-    let wormhole = kont.await.unwrap();
+    // let wormhole = kont.await.unwrap();
 
     unsafe {
-        let layout: Layout = Layout::new::<Wormhole>();
+        let layout: Layout = Layout::new::<std::future::Future<Output = Result<Box<Wormhole>, WormholeError>>>();
         let ptr = alloc(layout);
         if ptr.is_null() {
             handle_alloc_error(layout);
         }
 
-        *(ptr as *mut Wormhole) = wormhole;
+        *(ptr as *mut (std::future::Future<Output = Result<Box<Wormhole>, WormholeError>>)) = kont;
 
         return JsConnection {
             code: welcome.code,
@@ -116,123 +127,155 @@ pub async fn create_connection(cfg: &Config) -> JsConnection {
     }
 }
 
-async fn send_via_wormhole(file: Vec<u8>, file_size: u64, file_name: String, output: &web_sys::HtmlElement) {
-    let connect = Wormhole::connect_without_code(
-        transfer::APP_CONFIG.rendezvous_url("ws://relay.magic-wormhole.io:4000/v1".into()),
-        2,
-    );
-
-    match connect.await {
-        Ok((server_welcome, connector)) => {
-            console_log!("{}", server_welcome.code);
-            output.set_inner_text(&format!("wormhole code:  {}", server_welcome.code));
-
-            match connector.await {
-                Ok(wormhole) => {
-                    let transfer_result = transfer::send_file(
-                        wormhole,
-                        url::Url::parse("ws://piegames.de:4002").unwrap(),
-                        &mut &file[..],
-                        PathBuf::from(file_name),
-                        file_size,
-                        transit::Abilities::FORCE_RELAY,
-                        |info, address| {
-                            console_log!("Connected to '{:?}' on address {:?}", info, address);
-                        },
-                        |cur, total| {
-                            console_log!("Progress: {}/{}", cur, total);
-                        },
-                        NoOpFuture {},
-                    ).await;
-
-                    match transfer_result {
-                        Ok(_) => {
-                            console_log!("Data sent");
-                        }
-                        Err(e) => {
-                            console_log!("Error in data transfer: {:?}", e);
-                        }
-                    }
-                }
-                Err(_) => {
-                    console_log!("Error waiting for connection");
-                }
-            }
-        }
-        Err(_) => {
-            console_log!("Error in connection");
-        }
-    };
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct ReceiveResult {
-    data: Vec<u8>,
-    filename: String,
-    filesize: u64,
-}
-
 #[wasm_bindgen]
-pub async fn receive(code: String, output: web_sys::HtmlElement) -> Option<JsValue> {
-    let connect = Wormhole::connect_with_code(
-        transfer::APP_CONFIG.rendezvous_url("ws://relay.magic-wormhole.io:4000/v1".into()),
-        Code(code),
-    );
+pub async fn send_file(cfg: &Config, filename: String, ptr: u8) {
+    unsafe {
+        let wormhole = &*(ptr as *mut Wormhole);
+        println!("wormhole: {:?}", wormhole);
+    }
+    // let transfer_result = transfer::send_file(
+    //     wormhole,
+    //     url::Url::parse("ws://piegames.de:4002").unwrap(),
+    //     &mut &file[..],
+    //     PathBuf::from(file_name),
+    //     file_size,
+    //     transit::Abilities::FORCE_RELAY,
+    //     |info, address| {
+    //         console_log!("Connected to '{:?}' on address {:?}", info, address);
+    //     },
+    //     |cur, total| {
+    //         console_log!("Progress: {}/{}", cur, total);
+    //     },
+    //     NoOpFuture {},
+    // ).await;
 
-    return match connect.await {
-        Ok((_, wormhole)) => {
-            let req = transfer::request_file(
-                wormhole,
-                url::Url::parse("ws://piegames.de:4002").unwrap(),
-                transit::Abilities::FORCE_RELAY,
-                NoOpFuture {},
-            ).await;
-
-            let mut file: Vec<u8> = Vec::new();
-
-            match req {
-                Ok(Some(req)) => {
-                    let filename = req.filename.clone();
-                    let filesize = req.filesize;
-                    console_log!("File name: {:?}, size: {}", filename, filesize);
-                    let file_accept = req.accept(
-                        |info, address| {
-                            console_log!("Connected to '{:?}' on address {:?}", info, address);
-                        },
-                        |cur, total| {
-                            console_log!("Progress: {}/{}", cur, total);
-                        },
-                        &mut file,
-                        NoOpFuture {},
-                    );
-
-                    match file_accept.await {
-                        Ok(_) => {
-                            console_log!("Data received, length: {}", file.len());
-                            //let array: js_sys::Array = file.into_iter().map(JsValue::from).collect();
-                            //data: js_sys::Uint8Array::new(&array),
-                            let result = ReceiveResult {
-                                data: file,
-                                filename: filename.to_str().unwrap_or_default().into(),
-                                filesize,
-                            };
-                            return Some(JsValue::from_serde(&result).unwrap());
-                        }
-                        Err(e) => {
-                            console_log!("Error in data transfer: {:?}", e);
-                            None
-                        }
-                    }
-                }
-                _ => {
-                    console_log!("No ReceiveRequest");
-                    None
-                }
-            }
-        }
-        Err(_) => {
-            output.set_inner_text("Error in connection");
-            None
-        }
-    };
+    // match transfer_result {
+    //     Ok(_) => {
+    //         console_log!("Data sent");
+    //     }
+    //     Err(e) => {
+    //         console_log!("Error in data transfer: {:?}", e);
+    //     }
+    // }
 }
+
+// async fn send_via_wormhole(file: Vec<u8>, file_size: u64, file_name: String, output: &web_sys::HtmlElement) {
+//     let connect = Wormhole::connect_without_code(
+//         transfer::APP_CONFIG.rendezvous_url("ws://relay.magic-wormhole.io:4000/v1".into()),
+//         2,
+//     );
+
+//     match connect.await {
+//         Ok((server_welcome, connector)) => {
+//             console_log!("{}", server_welcome.code);
+//             output.set_inner_text(&format!("wormhole code:  {}", server_welcome.code));
+
+//             match connector.await {
+//                 Ok(wormhole) => {
+//                     let transfer_result = transfer::send_file(
+//                         wormhole,
+//                         url::Url::parse("ws://piegames.de:4002").unwrap(),
+//                         &mut &file[..],
+//                         PathBuf::from(file_name),
+//                         file_size,
+//                         transit::Abilities::FORCE_RELAY,
+//                         |info, address| {
+//                             console_log!("Connected to '{:?}' on address {:?}", info, address);
+//                         },
+//                         |cur, total| {
+//                             console_log!("Progress: {}/{}", cur, total);
+//                         },
+//                         NoOpFuture {},
+//                     ).await;
+
+//                     match transfer_result {
+//                         Ok(_) => {
+//                             console_log!("Data sent");
+//                         }
+//                         Err(e) => {
+//                             console_log!("Error in data transfer: {:?}", e);
+//                         }
+//                     }
+//                 }
+//                 Err(_) => {
+//                     console_log!("Error waiting for connection");
+//                 }
+//             }
+//         }
+//         Err(_) => {
+//             console_log!("Error in connection");
+//         }
+//     };
+// }
+
+// #[derive(serde::Serialize, serde::Deserialize)]
+// pub struct ReceiveResult {
+//     data: Vec<u8>,
+//     filename: String,
+//     filesize: u64,
+// }
+
+// #[wasm_bindgen]
+// pub async fn receive(code: String, output: web_sys::HtmlElement) -> Option<JsValue> {
+//     let connect = Wormhole::connect_with_code(
+//         transfer::APP_CONFIG.rendezvous_url("ws://relay.magic-wormhole.io:4000/v1".into()),
+//         Code(code),
+//     );
+
+//     return match connect.await {
+//         Ok((_, wormhole)) => {
+//             let req = transfer::request_file(
+//                 wormhole,
+//                 url::Url::parse("ws://piegames.de:4002").unwrap(),
+//                 transit::Abilities::FORCE_RELAY,
+//                 NoOpFuture {},
+//             ).await;
+
+//             let mut file: Vec<u8> = Vec::new();
+
+//             match req {
+//                 Ok(Some(req)) => {
+//                     let filename = req.filename.clone();
+//                     let filesize = req.filesize;
+//                     console_log!("File name: {:?}, size: {}", filename, filesize);
+//                     let file_accept = req.accept(
+//                         |info, address| {
+//                             console_log!("Connected to '{:?}' on address {:?}", info, address);
+//                         },
+//                         |cur, total| {
+//                             console_log!("Progress: {}/{}", cur, total);
+//                         },
+//                         &mut file,
+//                         NoOpFuture {},
+//                     );
+
+//                     match file_accept.await {
+//                         Ok(_) => {
+//                             console_log!("Data received, length: {}", file.len());
+//                             //let array: js_sys::Array = file.into_iter().map(JsValue::from).collect();
+//                             //data: js_sys::Uint8Array::new(&array),
+//                             let result = ReceiveResult {
+//                                 data: file,
+//                                 filename: filename.to_str().unwrap_or_default().into(),
+//                                 filesize,
+//                             };
+//                             return Some(JsValue::from_serde(&result).unwrap());
+//                         }
+//                         Err(e) => {
+//                             console_log!("Error in data transfer: {:?}", e);
+//                             None
+//                         }
+//                     }
+//                 }
+//                 _ => {
+//                     console_log!("No ReceiveRequest");
+//                     None
+//                 }
+//             }
+//         }
+//         Err(_) => {
+//             output.set_inner_text("Error in connection");
+//             None
+//         }
+//     };
+// }

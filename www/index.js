@@ -38,11 +38,26 @@ startButton.addEventListener('click', () => {
     }
 })
 
-fileInput.addEventListener('input', () => {
+fileInput.addEventListener('change', async (e) => {
+    const config = wasm.create_config(
+        "lothar.com/wormhole/text-or-file-xfer",
+        "ws://relay.magic-wormhole.io:4000/v1",
+        "",
+        2
+    )
+
+    console.log(config instanceof wasm.Config)
+
+    debugger;
+    const jsConnection = await wasm.create_connection(config);
+    debugger;
+    wasm.send_file(config, e.target.files[0].name, jsConnection.wormholeAddress);
+    /*
     wasm.send(fileInput, codeOutput)
         .then(x => {
             console.log("sending finished");
-        })
+            })
+            */
 })
 
 
