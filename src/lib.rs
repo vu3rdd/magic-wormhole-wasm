@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use magic_wormhole::{Code, transfer, transit, Wormhole, WormholeError};
+use magic_wormhole::{Code, transfer, transit, Wormhole, WormholeError, AppID};
 use wasm_bindgen::prelude::*;
+use std::{borrow::Cow, alloc::*};
 
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
@@ -70,6 +71,40 @@ pub async fn send(file_input: web_sys::HtmlInputElement, output: web_sys::HtmlEl
         Err(_) => {
             console_log!("Error reading file");
         }
+    }
+}
+
+
+#[wasm_bindgen]
+pub struct JsConnection {
+    code: Code,
+    wormholeAddress: u8,
+}
+
+#[wasm_bindgen]
+pub async fn create_connection(appid: String, rendezvous_url: String) -> JsConnection {
+    let mut config = transfer::APP_CONFIG;
+    config.id = AppID::from(appid);
+    config.rendezvous_url = Cow::from(rendezvous_url);
+    let connect = Wormhole::connect_without_code(config, 2);
+
+    // haven't serialized error types yet, so i just unwrap everything for now
+    let (welcome, kont) = connect.await.unwrap();
+    let wormhole = kont.await.unwrap();
+
+    unsafe {
+        let layout: Layout = Layout::new::<Wormhole>();
+        let ptr = alloc(layout);
+        if ptr.is_null() {
+            handle_alloc_error(layout);
+        }
+
+        *(ptr as *mut Wormhole) = wormhole;
+
+        return JsConnection {
+            code: welcome.code,
+            wormholeAddress: *ptr,
+        };
     }
 }
 
