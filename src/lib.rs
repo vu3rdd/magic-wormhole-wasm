@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use magic_wormhole::{Code, transfer, transit, Wormhole, WormholeError, AppID};
+use magic_wormhole::{Code, transfer, transit, Wormhole, WormholeError, AppID, AppConfig, transfer::AppVersion};
 use wasm_bindgen::prelude::*;
 use std::{borrow::Cow, alloc::*};
 
@@ -82,11 +82,19 @@ pub struct JsConnection {
 }
 
 #[wasm_bindgen]
-pub async fn create_connection(appid: String, rendezvous_url: String) -> JsConnection {
+pub struct Config {
+    appid:                    String,
+    rendezvous_url:           String,
+    transit_server_url:       String,
+    passphrase_component_len: usize,
+}
+
+#[wasm_bindgen]
+pub async fn create_connection(cfg: &Config) -> JsConnection {
     let mut config = transfer::APP_CONFIG;
-    config.id = AppID::from(appid);
-    config.rendezvous_url = Cow::from(rendezvous_url);
-    let connect = Wormhole::connect_without_code(config, 2);
+    config.id = AppID::from(cfg.appid.clone());
+    config.rendezvous_url = Cow::from(cfg.rendezvous_url.clone());
+    let connect = Wormhole::connect_without_code(config, cfg.passphrase_component_len);
 
     // haven't serialized error types yet, so i just unwrap everything for now
     let (welcome, kont) = connect.await.unwrap();
