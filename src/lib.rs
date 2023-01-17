@@ -2,8 +2,9 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use serde_json;
 
-use magic_wormhole::{Code, transfer, transit, Wormhole, WormholeError, AppID, AppConfig, transfer::AppVersion};
+use magic_wormhole::{Code, transfer, transit, Wormhole, WormholeError, AppID, AppConfig, transfer::AppVersion, rendezvous};
 use wasm_bindgen::prelude::*;
 use std::{borrow::Cow, alloc::*};
 
@@ -61,12 +62,28 @@ pub async fn send(file_input: web_sys::HtmlInputElement, output: web_sys::HtmlEl
 
             output.set_inner_text("connecting...");
 
-            send_via_wormhole(
-                data_to_send,
-                len,
-                file.name(),
-                &output,
-            ).await
+            let rendezvous_url_str = "ws://relay.magic-wormhole.io:4000/v1";
+            let config = transfer::APP_CONFIG.rendezvous_url(rendezvous_url_str.into());
+            let connect = Wormhole::connect_and_get_code(&config.id, rendezvous_url_str.to_string(), 2);
+
+            match connect.await {
+                Ok((server_welcome, server)) => {
+                    console_log!("{}", server_welcome.code);
+                    output.set_inner_text(&format!("wormhole code:  {}", server_welcome.code));
+
+                    send_via_wormhole(
+                        server_welcome.code,
+                        server,
+                        data_to_send,
+                        len,
+                        file.name(),
+                    ).await
+                }
+                Err(_) => {
+                    console_log!("Error waiting for connection");
+                }
+            }
+
         }
         Err(_) => {
             console_log!("Error reading file");
@@ -89,80 +106,44 @@ pub struct Config {
     passphrase_component_len: usize,
 }
 
-#[wasm_bindgen]
-pub async fn create_connection(cfg: &Config) -> JsConnection {
-    let mut config = transfer::APP_CONFIG;
-    config.id = AppID::from(cfg.appid.clone());
-    config.rendezvous_url = Cow::from(cfg.rendezvous_url.clone());
-    let connect = Wormhole::connect_without_code(config, cfg.passphrase_component_len);
+async fn send_via_wormhole(code: Code, server: rendezvous::RendezvousServer, file: Vec<u8>, file_size: u64, file_name: String) {
+    let rendezvous_url_str = "ws://relay.magic-wormhole.io:4000/v1";
+    let config = transfer::APP_CONFIG.rendezvous_url(rendezvous_url_str.into());
 
-    // haven't serialized error types yet, so i just unwrap everything for now
-    let (welcome, kont) = connect.await.unwrap();
-    let wormhole = kont.await.unwrap();
+    let versions = serde_json::to_value(config.app_version).unwrap();
+    let connector = Wormhole::connect_custom(server, config.id, code.0, versions);
 
-    unsafe {
-        let layout: Layout = Layout::new::<Wormhole>();
-        let ptr = alloc(layout);
-        if ptr.is_null() {
-            handle_alloc_error(layout);
-        }
+    match connector.await {
+        Ok(wormhole) => {
+            let transfer_result = transfer::send_file(
+                wormhole,
+                url::Url::parse("ws://piegames.de:4002").unwrap(),
+                &mut &file[..],
+                PathBuf::from(file_name),
+                file_size,
+                transit::Abilities::FORCE_RELAY,
+                |info, address| {
+                    console_log!("Connected to '{:?}' on address {:?}", info, address);
+                },
+                |cur, total| {
+                    console_log!("Progress: {}/{}", cur, total);
+                },
+                NoOpFuture {},
+            ).await;
 
-        *(ptr as *mut Wormhole) = wormhole;
-
-        return JsConnection {
-            code: welcome.code,
-            wormholeAddress: *ptr,
-        };
-    }
-}
-
-async fn send_via_wormhole(file: Vec<u8>, file_size: u64, file_name: String, output: &web_sys::HtmlElement) {
-    let connect = Wormhole::connect_without_code(
-        transfer::APP_CONFIG.rendezvous_url("ws://relay.magic-wormhole.io:4000/v1".into()),
-        2,
-    );
-
-    match connect.await {
-        Ok((server_welcome, connector)) => {
-            console_log!("{}", server_welcome.code);
-            output.set_inner_text(&format!("wormhole code:  {}", server_welcome.code));
-
-            match connector.await {
-                Ok(wormhole) => {
-                    let transfer_result = transfer::send_file(
-                        wormhole,
-                        url::Url::parse("ws://piegames.de:4002").unwrap(),
-                        &mut &file[..],
-                        PathBuf::from(file_name),
-                        file_size,
-                        transit::Abilities::FORCE_RELAY,
-                        |info, address| {
-                            console_log!("Connected to '{:?}' on address {:?}", info, address);
-                        },
-                        |cur, total| {
-                            console_log!("Progress: {}/{}", cur, total);
-                        },
-                        NoOpFuture {},
-                    ).await;
-
-                    match transfer_result {
-                        Ok(_) => {
-                            console_log!("Data sent");
-                        }
-                        Err(e) => {
-                            console_log!("Error in data transfer: {:?}", e);
-                        }
-                    }
+            match transfer_result {
+                Ok(_) => {
+                    console_log!("Data sent");
                 }
-                Err(_) => {
-                    console_log!("Error waiting for connection");
+                Err(e) => {
+                    console_log!("Error in data transfer: {:?}", e);
                 }
             }
         }
         Err(_) => {
-            console_log!("Error in connection");
+            console_log!("Error waiting for connection");
         }
-    };
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
