@@ -44,6 +44,27 @@ impl Future for NoOpFuture {
 }
 
 #[wasm_bindgen]
+pub struct ClientConfig {
+    appid:                    AppID,
+    rendezvous_url:           String,
+    transit_server_url:       String,
+    passphrase_component_len: usize,
+}
+
+#[wasm_bindgen]
+impl ClientConfig {
+    pub fn client_init(appid: &str, rendezvous_url: &str, transit_server_url: &str, passphrase_component_len: usize) -> Self {
+        Self {
+            appid: appid.to_string().into(),
+            rendezvous_url: rendezvous_url.to_string(),
+            transit_server_url: transit_server_url.to_string(),
+            passphrase_component_len: passphrase_component_len,
+        }
+    }
+}
+
+
+#[wasm_bindgen]
 pub async fn send(file_input: web_sys::HtmlInputElement, output: web_sys::HtmlElement) {
     let file_list = file_input.files().expect("Failed to get filelist from File Input!");
     if file_list.length() < 1 || file_list.get(0) == None {
@@ -62,7 +83,7 @@ pub async fn send(file_input: web_sys::HtmlInputElement, output: web_sys::HtmlEl
 
             output.set_inner_text("connecting...");
 
-            let rendezvous_url_str = "ws://relay.magic-wormhole.io:4000/v1";
+            let rendezvous_url_str = "wss://mailbox.mw.leastauthority.com/v1";
             let config = transfer::APP_CONFIG.rendezvous_url(rendezvous_url_str.into());
             let connect = Wormhole::connect_and_get_code(&config.id, rendezvous_url_str.to_string(), 2);
 
@@ -72,6 +93,7 @@ pub async fn send(file_input: web_sys::HtmlInputElement, output: web_sys::HtmlEl
                     output.set_inner_text(&format!("wormhole code:  {}", server_welcome.code));
 
                     send_via_wormhole(
+                        &config,
                         server_welcome.code,
                         server,
                         data_to_send,
@@ -91,33 +113,22 @@ pub async fn send(file_input: web_sys::HtmlInputElement, output: web_sys::HtmlEl
     }
 }
 
+async fn send_via_wormhole(config: &AppConfig<impl serde::Serialize + Send + Sync + 'static>,
+                           code: Code,
+                           server: rendezvous::RendezvousServer,
+                           file: Vec<u8>,
+                           file_size: u64,
+                           file_name: String) {
+    let transit_server_url = "wss://relay.winden.app/";
 
-#[wasm_bindgen]
-pub struct JsConnection {
-    code: Code,
-    wormholeAddress: u8,
-}
-
-#[wasm_bindgen]
-pub struct Config {
-    appid:                    String,
-    rendezvous_url:           String,
-    transit_server_url:       String,
-    passphrase_component_len: usize,
-}
-
-async fn send_via_wormhole(code: Code, server: rendezvous::RendezvousServer, file: Vec<u8>, file_size: u64, file_name: String) {
-    let rendezvous_url_str = "ws://relay.magic-wormhole.io:4000/v1";
-    let config = transfer::APP_CONFIG.rendezvous_url(rendezvous_url_str.into());
-
-    let versions = serde_json::to_value(config.app_version).unwrap();
-    let connector = Wormhole::connect_custom(server, config.id, code.0, versions);
+    let versions = serde_json::to_value({}).unwrap();
+    let connector = Wormhole::connect_custom(server, config.id.clone(), code.0, versions);
 
     match connector.await {
         Ok(wormhole) => {
             let transfer_result = transfer::send_file(
                 wormhole,
-                url::Url::parse("ws://piegames.de:4002").unwrap(),
+                url::Url::parse(transit_server_url).unwrap(),
                 &mut &file[..],
                 PathBuf::from(file_name),
                 file_size,
