@@ -61,6 +61,55 @@ impl ClientConfig {
             passphrase_component_len: passphrase_component_len,
         }
     }
+
+    pub async fn send(&self, file_input: web_sys::HtmlInputElement, output: web_sys::HtmlElement) {
+        let file_list = file_input.files().expect("Failed to get filelist from File Input!");
+        if file_list.length() < 1 || file_list.get(0) == None {
+            alert("Please select at least one valid file.");
+            return;
+        }
+
+        let file: web_sys::File = file_list.get(0).expect("Failed to get File from filelist!");
+
+        match wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await {
+            Ok(file_content) => {
+                let array = js_sys::Uint8Array::new(&file_content);
+                let len = array.byte_length() as u64;
+                let data_to_send: Vec<u8> = array.to_vec();
+                console_log!("Read raw data ({} bytes)", len);
+
+                output.set_inner_text("connecting...");
+
+                let rendezvous = Box::new(self.rendezvous_url.as_str());
+                let config = transfer::APP_CONFIG.rendezvous_url(Cow::Owned(rendezvous.to_string()));
+                let connect = Wormhole::connect_and_get_code(&config.id, rendezvous.to_string(), 2);
+
+                match connect.await {
+                    Ok((server_welcome, server)) => {
+                        console_log!("{}", server_welcome.code);
+                        output.set_inner_text(&format!("wormhole code:  {}", server_welcome.code));
+
+                        send_via_wormhole(
+                            &config,
+                            server_welcome.code,
+                            server,
+                            data_to_send,
+                            len,
+                            file.name(),
+                        ).await
+                    }
+                    Err(_) => {
+                        console_log!("Error waiting for connection");
+                    }
+                }
+
+            }
+            Err(_) => {
+                console_log!("Error reading file");
+            }
+        }
+    }
+
 }
 
 
