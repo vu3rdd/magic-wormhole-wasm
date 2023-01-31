@@ -3,9 +3,11 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use serde_json;
+use futures::io::{AsyncRead, Error};
 
 use magic_wormhole::{Code, transfer, transit, Wormhole, WormholeError, AppID, AppConfig, transfer::AppVersion, rendezvous};
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::JsFuture;
 use std::{borrow::Cow, alloc::*};
 
 #[cfg(feature = "wee_alloc")]
@@ -291,4 +293,42 @@ pub async fn receive(code: String, output: web_sys::HtmlElement) -> Option<JsVal
             None
         }
     };
+}
+
+struct FileWrapper {
+    file: web_sys::File,
+    size: i32,
+    index: i32,
+}
+
+impl FileWrapper {
+    fn new(file: web_sys::File) -> Self {
+        let size = file.size();
+        FileWrapper {
+            file: file,
+            size: size as i32,
+            index: 0,
+        }
+    }
+}
+
+impl AsyncRead for FileWrapper {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut [u8])
+                 -> Poll<Result<usize, Error>> {
+        // use File::slice to read into buf
+        // Poll::Ready(io::Read::read(&mut *self, buf))
+        let start = self.index;
+        let end = i32::min(start + buf.len() as i32, self.size);
+        let size = end - start;
+
+        let blob = self.file.slice_with_i32_and_i32(start, end).unwrap();
+
+        async {
+            let array_buffer_promise: JsFuture = blob.array_buffer().into();
+            let array_buffer: JsValue = array_buffer_promise.await.unwrap();
+            js_sys::Uint8Array::new(&array_buffer).copy_to(buf);
+        };
+
+        Poll::Ready(Ok(size as usize))
+    }
 }
