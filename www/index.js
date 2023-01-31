@@ -17,9 +17,8 @@ function downloadFile(data, fileName) {
 }
 
 (function () {
-        wasm.init()
-    }
-)();
+    wasm.init()
+})();
 
 startButton.addEventListener('click', () => {
     const code = codeInput.value;
@@ -27,7 +26,8 @@ startButton.addEventListener('click', () => {
     if (!code) {
         alert("Please enter a code")
     } else {
-        wasm.receive(code, codeOutput)
+        let clientConfig = wasm.ClientConfig.client_init("lothar.com/wormhole/text-or-file-xfer", "wss://mailbox.mw.leastauthority.com/v1", "wss://relay.winden.app/", 2);
+        clientConfig.receive(code, codeOutput)
             .then(x => {
                 console.log("receiving finished", x);
                 if (x) {
@@ -39,7 +39,8 @@ startButton.addEventListener('click', () => {
 })
 
 fileInput.addEventListener('input', () => {
-    wasm.send(fileInput, codeOutput)
+    let clientConfig = wasm.ClientConfig.client_init("lothar.com/wormhole/text-or-file-xfer", "wss://mailbox.mw.leastauthority.com/v1", "wss://relay.winden.app/", 2);
+    clientConfig.send(fileInput, codeOutput)
         .then(x => {
             console.log("sending finished");
         })
