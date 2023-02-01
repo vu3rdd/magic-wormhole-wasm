@@ -297,13 +297,14 @@ impl FileWrapper {
 }
 
 impl AsyncRead for FileWrapper {
-    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut [u8])
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut [u8])
                  -> Poll<Result<usize, Error>> {
         // use File::slice to read into buf
         // Poll::Ready(io::Read::read(&mut *self, buf))
         let start = self.index;
         let end = i32::min(start + buf.len() as i32, self.size);
         let size = end - start;
+        self.index += size;
 
         let blob = self.file.slice_with_i32_and_i32(start, end).unwrap();
 
