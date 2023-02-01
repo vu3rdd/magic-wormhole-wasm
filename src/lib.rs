@@ -64,51 +64,35 @@ impl ClientConfig {
         }
     }
 
-    pub async fn send(&self, file_input: web_sys::HtmlInputElement, output: web_sys::HtmlElement) {
-        let file_list = file_input.files().expect("Failed to get filelist from File Input!");
-        if file_list.length() < 1 || file_list.get(0) == None {
-            alert("Please select at least one valid file.");
-            return;
-        }
+    pub async fn send(&self, file: web_sys::File, output: web_sys::HtmlElement, on_read: js_sys::Function) {
+        let on_read_box = Box::new(on_read);
+        let name = file.name();
+        let mut file_wrapper = FileWrapper::new(file, on_read_box);
+        let size = file_wrapper.size;
 
-        let file: web_sys::File = file_list.get(0).expect("Failed to get File from filelist!");
+        output.set_inner_text("connecting...");
 
-        match wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await {
-            Ok(file_content) => {
-                let array = js_sys::Uint8Array::new(&file_content);
-                let len = array.byte_length() as u64;
-                let data_to_send: Vec<u8> = array.to_vec();
-                console_log!("Read raw data ({} bytes)", len);
+        let rendezvous = Box::new(self.rendezvous_url.as_str());
+        let config = transfer::APP_CONFIG.rendezvous_url(Cow::Owned(rendezvous.to_string()));
+        let connect = Wormhole::connect_and_get_code(&config.id, rendezvous.to_string(), 2);
 
-                output.set_inner_text("connecting...");
+        match connect.await {
+            Ok((server_welcome, server)) => {
+                console_log!("{}", server_welcome.code);
+                output.set_inner_text(&format!("wormhole code:  {}", server_welcome.code));
 
-                let rendezvous = Box::new(self.rendezvous_url.as_str());
-                let config = transfer::APP_CONFIG.rendezvous_url(Cow::Owned(rendezvous.to_string()));
-                let connect = Wormhole::connect_and_get_code(&config.id, rendezvous.to_string(), 2);
-
-                match connect.await {
-                    Ok((server_welcome, server)) => {
-                        console_log!("{}", server_welcome.code);
-                        output.set_inner_text(&format!("wormhole code:  {}", server_welcome.code));
-
-                        send_via_wormhole(
-                            &config,
-                            server_welcome.code,
-                            server,
-                            &self.transit_server_url,
-                            data_to_send,
-                            len,
-                            file.name(),
-                        ).await
-                    }
-                    Err(_) => {
-                        console_log!("Error waiting for connection");
-                    }
-                }
-
+                send_via_wormhole(
+                    &config,
+                    server_welcome.code,
+                    server,
+                    &self.transit_server_url,
+                    &mut file_wrapper,
+                    size as u64,
+                    name,
+                ).await
             }
             Err(_) => {
-                console_log!("Error reading file");
+                console_log!("Error waiting for connection");
             }
         }
     }
@@ -183,7 +167,7 @@ async fn send_via_wormhole(config: &AppConfig<impl serde::Serialize + Send + Syn
                            code: Code,
                            server: rendezvous::RendezvousServer,
                            transit_server_url: &str,
-                           file: Vec<u8>,
+                           mut file: &mut FileWrapper,
                            file_size: u64,
                            file_name: String) {
 
@@ -195,7 +179,7 @@ async fn send_via_wormhole(config: &AppConfig<impl serde::Serialize + Send + Syn
             let transfer_result = transfer::send_file(
                 wormhole,
                 url::Url::parse(transit_server_url).unwrap(),
-                &mut &file[..],
+                &mut file,
                 PathBuf::from(file_name),
                 file_size,
                 transit::Abilities::FORCE_RELAY,
