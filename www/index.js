@@ -20,6 +20,10 @@ function downloadFile(data, fileName) {
     wasm.init()
 })();
 
+// fileInput.addEventListener('change', (e) => {
+//     const file = e.target.files[0];
+// })
+
 startButton.addEventListener('click', () => {
     const code = codeInput.value;
 
@@ -38,9 +42,16 @@ startButton.addEventListener('click', () => {
     }
 })
 
-fileInput.addEventListener('input', () => {
+fileInput.addEventListener('input', (e) => {
     let clientConfig = wasm.ClientConfig.client_init("lothar.com/wormhole/text-or-file-xfer", "wss://mailbox.mw.leastauthority.com/v1", "wss://relay.winden.app/", 2);
-    clientConfig.send(fileInput, codeOutput)
+    clientConfig.send(e.target.files[0], codeOutput, async (blob) => {
+        // console.log(blob)
+        const arrayBuffer = await blob.arrayBuffer()
+        // console.log(arrayBuffer)
+        const result = new Uint8Array(arrayBuffer)
+        // console.log(result)
+        return result
+    })
         .then(x => {
             console.log("sending finished");
         })
