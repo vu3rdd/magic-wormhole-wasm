@@ -313,8 +313,12 @@ impl AsyncRead for FileWrapper {
 
         let mut array_buffer_future: JsFuture = blob.array_buffer().into();
         match Pin::new(&mut array_buffer_future).poll(cx) {
-            Poll::Pending => Poll::Pending,
+            Poll::Pending => {
+                console_log!("pending...");
+                Poll::Pending
+            },
             Poll::Ready(array_buffer) => {
+                console_log!("array_buffer: {:?}", array_buffer);
                 js_sys::Uint8Array::new(&array_buffer.unwrap()).copy_to(buf);
                 Poll::Ready(Ok(size as usize))
             }
