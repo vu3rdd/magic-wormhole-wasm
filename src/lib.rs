@@ -315,14 +315,13 @@ impl AsyncRead for FileWrapper {
         let blob = self.file.slice_with_i32_and_i32(start, end).unwrap();
 
         let array_buffer_future: JsFuture = blob.array_buffer().into();
-        unsafe {
-            match array_buffer_future.poll() {
-                Poll::Pending => Poll::Pending,
-                Poll::Ready(array_buffer) => {
-                    js_sys::Uint8Array::new(&array_buffer).copy_to(buf);
-                    Poll::Ready(Ok(size as usize))
-                },
-            }
+
+        match array_buffer_future.poll() {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(array_buffer) => {
+                js_sys::Uint8Array::new(&array_buffer).copy_to(buf);
+                Poll::Ready(Ok(size as usize))
+            },
         }
     }
 }
