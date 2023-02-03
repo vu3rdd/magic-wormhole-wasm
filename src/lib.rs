@@ -313,28 +313,23 @@ impl AsyncRead for FileWrapper {
         self.index += size;
 
         let blob = self.file.slice_with_i32_and_i32(start, end).unwrap();
-        let result: js_sys::Promise = self.on_read.call1(&JsValue::null(), &blob).unwrap().into();
 
-        result.then(&|x| {
-            return Promise(buf, x)
-        }).then(&self.closure);
-        // console_log!("{:?}", result);
-
-        // result.copy_to(buf);
-
-        // Promise.resolve(5) => Promise<number>
-        // let array_buffer_promise: JsFuture = blob.array_buffer()
-        //     .then(|array_buffer| {
-        //         js_sys::Uint8Array::new(&array_buffer).copy_to(buf);
-        //     });
-
-        // let f = async {
-        //     let array_buffer_promise: JsFuture = blob.array_buffer().into();
-        //     let array_buffer: JsValue = array_buffer_promise.await.unwrap();
-        //     console_log!("range: {:?}", array_buffer);
-        //     js_sys::Uint8Array::new(&array_buffer).copy_to(buf);
-        // };
-        // f.await.unwrap();
+        let f = async {
+            let array_buffer_promise: JsFuture = blob.array_buffer().into();
+            match array_buffer_promise.await {
+                Ok(array_buffer) => {
+                    console_log!("range: {:?}", array_buffer);
+                    js_sys::Uint8Array::new(&array_buffer).copy_to(buf);
+                }
+                _ => {
+                    console_log!("not ready");
+                }
+            }
+            // let array_buffer: JsValue = array_buffer_promise.await.unwrap();
+            // console_log!("range: {:?}", array_buffer);
+            // js_sys::Uint8Array::new(&array_buffer).copy_to(buf);
+        };
+        let _res = Pin::new(&mut f).poll();
 
         Poll::Ready(Ok(size as usize))
     }
