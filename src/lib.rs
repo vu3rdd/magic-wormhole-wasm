@@ -64,10 +64,9 @@ impl ClientConfig {
         }
     }
 
-    pub async fn send(&self, file: web_sys::File, output: web_sys::HtmlElement, on_read: js_sys::Function) {
-        let on_read_box = Box::new(on_read);
+    pub async fn send(&self, file: web_sys::File, output: web_sys::HtmlElement) {
         let name = file.name();
-        let mut file_wrapper = FileWrapper::new(file, on_read_box);
+        let mut file_wrapper = FileWrapper::new(file);
         let size = file_wrapper.size;
 
         output.set_inner_text("connecting...");
@@ -283,28 +282,26 @@ struct FileWrapper {
     file: web_sys::File,
     size: i32,
     index: i32,
-    on_read: Box<js_sys::Function>,
-    closure: Closure<dyn FnMut(JsValue)>
 }
 
 impl FileWrapper {
-    fn new(file: web_sys::File, on_read: Box<js_sys::Function>) -> Self {
+    fn new(file: web_sys::File) -> Self {
         let size = file.size();
         FileWrapper {
             file: file,
             size: size as i32,
             index: 0,
-            on_read,
-            closure: Closure::new(|x| {
-                console_log!("{:?}", x);
-            })
         }
     }
 }
 
 impl AsyncRead for FileWrapper {
-    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut [u8])
-                 -> Poll<Result<usize, Error>> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<Result<usize, Error>> {
+
         // use File::slice to read into buf
         // Poll::Ready(io::Read::read(&mut *self, buf))
         let start = self.index;
@@ -314,14 +311,13 @@ impl AsyncRead for FileWrapper {
 
         let blob = self.file.slice_with_i32_and_i32(start, end).unwrap();
 
-        let array_buffer_future: JsFuture = blob.array_buffer().into();
-
-        match array_buffer_future.poll() {
+        let mut array_buffer_future: JsFuture = blob.array_buffer().into();
+        match Pin::new(&mut array_buffer_future).poll(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(array_buffer) => {
-                js_sys::Uint8Array::new(&array_buffer).copy_to(buf);
+                js_sys::Uint8Array::new(&array_buffer.unwrap()).copy_to(buf);
                 Poll::Ready(Ok(size as usize))
-            },
+            }
         }
     }
 }
