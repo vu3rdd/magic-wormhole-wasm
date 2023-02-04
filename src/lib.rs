@@ -282,6 +282,7 @@ struct FileWrapper {
     file: web_sys::File,
     size: i32,
     index: i32,
+    f: Box<Option<JsFuture>>
 }
 
 impl FileWrapper {
@@ -291,6 +292,7 @@ impl FileWrapper {
             file: file,
             size: size as i32,
             index: 0,
+            f: Box::new(None),
         }
     }
 }
@@ -306,21 +308,45 @@ impl AsyncRead for FileWrapper {
         // Poll::Ready(io::Read::read(&mut *self, buf))
         let start = self.index;
         let end = i32::min(start + buf.len() as i32, self.size);
-        let size = end - start;
-        self.index += size;
 
-        let blob = self.file.slice_with_i32_and_i32(start, end).unwrap();
+        if let Some(f) = &mut *self.f {
+            //let Some(f) = &mut *self.f;
 
-        let mut array_buffer_future: JsFuture = blob.array_buffer().into();
-        match Pin::new(&mut array_buffer_future).poll(cx) {
-            Poll::Pending => {
-                console_log!("pending...");
-                Poll::Pending
-            },
-            Poll::Ready(array_buffer) => {
-                console_log!("array_buffer: {:?}", array_buffer);
-                js_sys::Uint8Array::new(&array_buffer.unwrap()).copy_to(buf);
-                Poll::Ready(Ok(size as usize))
+            let p = Pin::new(&mut *f);
+            match p.poll(cx) {
+                Poll::Pending => {
+                    Poll::Pending
+                },
+                Poll::Ready(array_buffer) => {
+                    let abuf: js_sys::ArrayBuffer = array_buffer.unwrap().into();
+                    js_sys::Uint8Array::new(&abuf).copy_to(buf);
+                    self.f = Box::new(None);
+                    let size = end - start;
+                    // let size = abuf.byte_length() as i32;
+                    self.index += size;
+                    Poll::Ready(Ok(size as usize))
+                }
+            }
+        } else {
+            let blob = self.file.slice_with_i32_and_i32(start, end).unwrap();
+
+            let mut array_buffer_future: JsFuture = blob.array_buffer().into();
+            let p = Pin::new(&mut array_buffer_future);
+            match p.poll(cx) {
+                Poll::Pending => {
+                    self.f = Box::new(Some(array_buffer_future));
+                    Poll::Pending
+                },
+                Poll::Ready(array_buffer) => {
+                    let abuf: js_sys::ArrayBuffer = array_buffer.unwrap().into();
+                    js_sys::Uint8Array::new(&abuf).copy_to(buf);
+                    self.f = Box::new(None);
+                    // let abuf: js_sys::ArrayBuffer = array_buffer.unwrap().into();
+                    // let size = abuf.byte_length() as i32;
+                    let size = end - start;
+                    self.index += size;
+                    Poll::Ready(Ok((end - start) as usize))
+                }
             }
         }
     }
