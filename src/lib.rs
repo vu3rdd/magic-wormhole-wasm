@@ -310,8 +310,6 @@ impl AsyncRead for FileWrapper {
         let end = i32::min(start + buf.len() as i32, self.size);
 
         if let Some(f) = &mut *self.f {
-            //let Some(f) = &mut *self.f;
-
             let p = Pin::new(&mut *f);
             match p.poll(cx) {
                 Poll::Pending => {
@@ -324,7 +322,6 @@ impl AsyncRead for FileWrapper {
                     }
                     self.f = Box::new(None);
                     let size = end - start;
-                    // let size = abuf.byte_length() as i32;
                     self.index += size;
                     Poll::Ready(Ok(size as usize))
                 }
@@ -345,8 +342,6 @@ impl AsyncRead for FileWrapper {
                         js_sys::Uint8Array::new(&abuf).raw_copy_to_ptr(buf.as_mut_ptr());
                     }
                     self.f = Box::new(None);
-                    // let abuf: js_sys::ArrayBuffer = array_buffer.unwrap().into();
-                    // let size = abuf.byte_length() as i32;
                     let size = end - start;
                     self.index += size;
                     Poll::Ready(Ok((end - start) as usize))
