@@ -252,9 +252,8 @@ impl AsyncRead for FileWrapper {
                 },
                 Poll::Ready(array_buffer) => {
                     let abuf: js_sys::ArrayBuffer = array_buffer.unwrap().into();
-                    unsafe {
-                        js_sys::Uint8Array::new(&abuf).raw_copy_to_ptr(buf.as_mut_ptr());
-                    }
+                    let abuf_size = abuf.byte_length() as usize;
+                    js_sys::Uint8Array::new(&abuf).copy_to(&mut buf[..abuf_size]);
                     self.f = Box::new(None);
                     let size = end - start;
                     self.index += size;
@@ -273,9 +272,8 @@ impl AsyncRead for FileWrapper {
                 },
                 Poll::Ready(array_buffer) => {
                     let abuf: js_sys::ArrayBuffer = array_buffer.unwrap().into();
-                    unsafe {
-                        js_sys::Uint8Array::new(&abuf).raw_copy_to_ptr(buf.as_mut_ptr());
-                    }
+                    let abuf_size = abuf.byte_length() as usize;
+                    js_sys::Uint8Array::new(&abuf).copy_to(&mut buf[..abuf_size]);
                     self.f = Box::new(None);
                     let size = end - start;
                     self.index += size;
